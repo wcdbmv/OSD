@@ -69,6 +69,7 @@ static const char *interrupt_name[256] = {
 #define PAGE_FAULT_ERROR_CODE_U_S	(1 << 2)
 #define PAGE_FAULT_ERROR_CODE_RSV	(1 << 3)
 #define PAGE_FAULT_ERROR_CODE_I_D	(1 << 4)
+
 void page_fault_handler(struct task *task)
 {
 	uintptr_t va = rcr2();
@@ -79,7 +80,7 @@ void page_fault_handler(struct task *task)
 		goto fail;
 
 fail:
-	terminal_printf("Page fault at '%lx', opration: %s, accessed by: %s\n", va,
+	terminal_printf("Page fault at '%lx', operation: %s, accessed by: %s\n", va,
 			(task->context.error_code & PAGE_FAULT_ERROR_CODE_R_W) != 0 ? "write" : "read",
 			(task->context.error_code & PAGE_FAULT_ERROR_CODE_U_S) != 0 ? "user" : "supervisor");
 	if (pte != NULL && (*pte & PTE_COW) != 0)
@@ -99,7 +100,7 @@ void interrupt_handler(struct task_context ctx)
 {
 	struct cpu_context *cpu = cpu_context();
 
-	// XXX: Interrups are disabled here, think twice before enable it,
+	// XXX: Interrupts are disabled here, think twice before enable it,
 	// because they can modify 'cpu' value (it may cause a lot of problems)
 	cpu->task->context = ctx;
 	cpu->task->state = TASK_STATE_READY;
@@ -186,7 +187,7 @@ void interrupt_init(void)
 	};
 
 	// LAB4 Instruction: initialize idt, don't forget that interrupts and
-	// exceptions, wich may occur inside kernel space should use IST,
+	// exceptions, witch may occur inside kernel space should use IST,
 	// to force stack switch
 
 	// Load idt
@@ -202,7 +203,7 @@ void interrupt_init(void)
 	// stack (use cpu->pml4)
 	(void)cpu;
 
-	// For now this os support only one processor, so we must initialize
+	// For now OS support only one processor, so we must initialize
 	// only one tss. If you want use more processors -- you should
 	// initialize tss for each one.
 	tss[0].rsp0 = EXCEPTION_STACK_TOP;
