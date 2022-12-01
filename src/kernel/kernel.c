@@ -87,7 +87,7 @@ void kernel_init_mmap(void)
 }
 #endif
 
-#if LAB >= 8
+#if LAB >= 7
 // Just to demonstrate possible threads implementation
 void kernel_thread(void *arg __attribute__((unused)))
 {
@@ -140,11 +140,11 @@ void kernel_main(void)
 
     //TASK_STATIC_INITIALIZER(yield);
     //TASK_STATIC_INITIALIZER(fork);
-    TASK_STATIC_INITIALIZER(spin);
+    //TASK_STATIC_INITIALIZER(spin);
     //TASK_STATIC_INITIALIZER(exit);
 #endif
 
-#if LAB >= 8
+#if LAB >= 7
     struct task *thread = thread_create("scheduler", kernel_thread, NULL, 0);
     if (thread == NULL)
         panic("can't create kernel thread");

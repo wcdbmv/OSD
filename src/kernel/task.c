@@ -185,7 +185,7 @@ static int task_load_segment(struct task *task, const char *name,
 }
 
 // LAB6 Instruction:
-// - load all proram headers with type 'load' (use 'task_load_segment')
+// - load all program headers with type 'load' (use 'task_load_segment')
 // - setup task 'rip'
 static int task_load(struct task *task, const char *name, uint8_t *binary, size_t size)
 {
@@ -268,16 +268,16 @@ void task_run(struct task *task)
     );
 }
 
+// LAB6 Instruction: implement scheduler
+// - check all tasks in state 'ready'
+// - load new 'cr3'
+// - setup 'cpu' context
+// - run new task
 void schedule(void)
 {
     struct cpu_context *cpu = cpu_context();
     static int next_task_idx = 0;
 
-    // LAB6 Instruction: implement scheduler
-    // - check all tasks in state 'ready'
-    // - load new 'cr3'
-    // - setup 'cpu' context
-    // - run new task
     (void)cpu;
     (void)next_task_idx;
 

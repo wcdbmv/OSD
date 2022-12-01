@@ -35,10 +35,6 @@ lab7: configure drop
 	./configure --enable-lab=7
 	$(MAKE) -f Makefile
 
-lab8: configure drop
-	./configure --enable-lab=8
-	$(MAKE) -f Makefile
-
 drop: clean
 	rm -f Makefile
 	rm -f user/Makefile
@@ -67,4 +63,4 @@ qemu-no-reboot: Makefile
 all-am:
 clean-am:
 
-.PHONY: all drop clean lab1 lab2 lab3 lab4 lab5 lab6 lab7 lab8
+.PHONY: all drop clean lab1 lab2 lab3 lab4 lab5 lab6 lab7
