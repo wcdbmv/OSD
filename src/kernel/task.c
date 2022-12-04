@@ -18,10 +18,17 @@ static LIST_HEAD(task_free, task) free_tasks = LIST_HEAD_INITIALIZER(task_free);
 static struct task tasks[TASK_MAX_CNT];
 static task_id_t last_task_id;
 
-// LAB6 Instruction: initialize tasks list, and mark them as free
+// LAB6 Instruction:
+// - initialize tasks list, and mark them as free
+// - check 'struct task', what fields it contains
+// - check 'struct cpu', what fields it contains
+// - helpful const TASK_MAX_CNT
+// - use LIST macros
 void task_init(void)
 {
     struct cpu_context *cpu = cpu_context();
+
+    // loop here
 
     cpu->task = &cpu->self_task;
     memset(cpu->task, 0, sizeof(*cpu->task));
@@ -273,6 +280,7 @@ void task_run(struct task *task)
 // - load new 'cr3'
 // - setup 'cpu' context
 // - run new task
+// - we have only on processor!
 void schedule(void)
 {
     struct cpu_context *cpu = cpu_context();
@@ -280,6 +288,8 @@ void schedule(void)
 
     (void)cpu;
     (void)next_task_idx;
+
+    // loop here
 
     panic("no more tasks");
 }

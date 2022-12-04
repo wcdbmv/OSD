@@ -88,7 +88,6 @@ void kernel_init_mmap(void)
 #endif
 
 #if LAB >= 7
-// Just to demonstrate possible threads implementation
 void kernel_thread(void *arg __attribute__((unused)))
 {
     while (1) {
