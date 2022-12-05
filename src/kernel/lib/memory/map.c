@@ -57,17 +57,17 @@ uint64_t page2pa(struct page *p)
 	return (p - mmap_state->pages) << PAGE_SHIFT;
 }
 
-struct page *pa2page(uint64_t addr)
+struct page* pa2page(uint64_t addr)
 {
 	return &mmap_state->pages[addr >> PAGE_SHIFT];
 }
 
-void *page2kva(struct page *p)
+void* page2kva(struct page *p)
 {
 	return VADDR(page2pa(p));
 }
 
-pte_t *mmap_lookup(pml4e_t *pml4, uint64_t va, bool create)
+pte_t* mmap_lookup(pml4e_t *pml4, uint64_t va, bool create)
 {
 	struct page *page4pdp = NULL, *page4pd = NULL, *page4pt = NULL;
 	pdpe_t pml4e = pml4[PML4_IDX(va)];

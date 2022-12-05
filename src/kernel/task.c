@@ -22,7 +22,6 @@ static task_id_t last_task_id;
 // - initialize tasks list, and mark them as free
 // - check 'struct task', what fields it contains
 // - check 'struct cpu', what fields it contains
-// - helpful const TASK_MAX_CNT
 // - use LIST macros
 void task_init(void)
 {
@@ -52,6 +51,7 @@ void task_list(void)
 // - don't allow destroy kernel thread (check privilege level)
 void task_kill(task_id_t task_id)
 {
+    // loop here
     terminal_printf("Can't kill task '%d': no such task\n", task_id);
 }
 
@@ -59,7 +59,7 @@ void task_kill(task_id_t task_id)
 // - setup 'task->pml4'
 // - clear it
 // - initialize kernel space part of 'task->pml4'
-struct task *task_new(const char *name)
+struct task* task_new(const char *name)
 {
     struct kernel_config *config = (struct kernel_config *)KERNEL_INFO;
     pml4e_t *kernel_pml4 = config->pml4.ptr;
@@ -196,6 +196,7 @@ static int task_load_segment(struct task *task, const char *name,
 // - setup task 'rip'
 static int task_load(struct task *task, const char *name, uint8_t *binary, size_t size)
 {
+    struct kernel_config *config = (struct kernel_config *)KERNEL_INFO;
     struct elf64_header *elf_header = (struct elf64_header *)binary;
 
     if (elf_header->e_magic != ELF_MAGIC) {
@@ -275,7 +276,8 @@ void task_run(struct task *task)
     );
 }
 
-// LAB6 Instruction: implement scheduler
+// LAB6 Instruction: 
+// - implement scheduler
 // - check all tasks in state 'ready'
 // - load new 'cr3'
 // - setup 'cpu' context
