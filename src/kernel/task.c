@@ -204,6 +204,7 @@ static int task_load(struct task *task, const char *name, uint8_t *binary, size_
         return -1;
     }
 
+    (void)config;
     (void)task;
     (void)name;
     (void)size;
@@ -276,7 +277,7 @@ void task_run(struct task *task)
     );
 }
 
-// LAB6 Instruction: 
+// LAB6 Instruction:
 // - implement scheduler
 // - check all tasks in state 'ready'
 // - load new 'cr3'

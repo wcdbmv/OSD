@@ -17,6 +17,11 @@ struct bios_mmap_entry
 {
     uint64_t base_addr;
     uint64_t addr_len;
+#define BIOS_MEMORY_AVAILABLE              1
+#define BIOS_MEMORY_RESERVED               2
+#define BIOS_MEMORY_ACPI_RECLAIMABLE       3
+#define BIOS_MEMORY_NVS                    4
+#define BIOS_MEMORY_BADRAM                 5
     uint32_t type;
     uint32_t acpi_attrs;
 };
@@ -66,19 +71,37 @@ void loader_enter_long_mode(uint64_t kernel_entry_point);
 // Why this address? See 'boot/boot.S'
 #define BOOT_MMAP_ADDR 0x7e00
 
+// До перехода на выделение памяти страницами, системе нужно выделить память
+// для ряда управляющих структур и каталога страниц. Отметим сразу, что после
+// этого ядро практически перестает выделять память под собственные нужды:
+// дальнейшее выделение физической памяти происходит только для запуска
+// и работы программ пользователя, включая создание новых таблиц страниц.
 void loader_main(void)
 {
     terminal_init();
 
 #if LAB >= 2
     // Next two parameters are prepared by the first loader
+    // Следующие два параметра подготовлены первым загрузчиком:
+    // — начальный адрес доступных областей памяти
+    // — количество этих самых областей
+
+    // Сохраним указатель на массив дескрипторов областей памяти
+    // и на количество элементов в нём
     struct bios_mmap_entry *mm = (struct bios_mmap_entry *)BOOT_MMAP_ADDR;
+    // 2. Сохраним количество элементов в массиве
     uint32_t cnt = *((uint32_t *)BOOT_MMAP_ADDR - 1);
 
+    // Загрузим ядро с диска
     uint64_t kernel_entry_point;
     if (loader_read_kernel(&kernel_entry_point) != 0)
         goto something_bad;
 
+    // После выполнения всех предыдущих этапов система может наконец перейти
+    // на плоскую модель сегментов и начать использовать страничное преобразование адресов.
+    // Переход будет осуществляться функцией loader_init_memory и loader_enter_long_mode
+
+    // Определим количество доступной памяти и инициализируем её
     uint64_t pages_cnt = loader_detect_memory(mm, cnt);
     if (loader_init_memory(mm, cnt, pages_cnt) != 0)
         goto something_bad;
@@ -103,13 +126,17 @@ something_bad:
 // - return allocated memory_chunk
 void *loader_alloc(uint64_t size, uint32_t align)
 {
-    (void)size;
-    (void)align;
+    //------------------//
+    // Выделение памяти //
+    // -----------------//
 
     uint8_t *memory_chunk;
-    (void)memory_chunk;
+    // Начало доступной памяти выравниваем по align, это и будет адрес начала выделенной памяти
+    memory_chunk = (void *)ROUND_UP((uint32_t)free_memory, align);
+    // А саму доступную память уменьшаем на размер выделенной памяти
+    free_memory = memory_chunk + size;
 
-    return NULL;
+    return memory_chunk;
 }
 
 // LAB2 Instruction:
@@ -124,7 +151,47 @@ void *loader_alloc(uint64_t size, uint32_t align)
 #define KERNEL_BASE_DISK_SECTOR 2048 // 1Mb
 int loader_read_kernel(uint64_t *kernel_entry_point)
 {
-    *kernel_entry_point = 0;
+    //-----------------------//
+    // Загрузка ядра с диска //
+    //-----------------------//
+
+    // Для загрузки ядра системы необходимо определить точку входа и прочитать заголовки elf файла
+
+    // Память для elf_header выделяется с помощью функции loader_alloc
+    struct elf64_header *elf_header = loader_alloc(sizeof(*elf_header), PAGE_SIZE);
+
+    // Читаем заголовок KERNEL_BASE_DISK_SECTOR из elf файла
+    if (disk_io_read_segment((uint32_t)elf_header, ATA_SECTOR_SIZE, KERNEL_BASE_DISK_SECTOR) != 0) {
+        terminal_printf("Can't read elf header\n");
+        return -1;
+    }
+
+    // Проверяем магическое число в заголовке
+    if (elf_header->e_magic != ELF_MAGIC) {
+        terminal_printf("Invalid elf format, magic mismatch (%u)", elf_header->e_magic);
+        return -1;
+    }
+
+    // Читаем хедеры секторов
+    for (struct elf64_program_header *ph = ELF64_PHEADER_FIRST(elf_header); ph < ELF64_PHEADER_LAST(elf_header); ph++) {
+        // Правильно отображаем виртуальные адреса в физические. Для этого старшие байты
+        // виртуального адреса надо отбросить, чтобы поддерживался следующий мэппинг памяти
+        // [KERNBASE; KERNBASE+FREEMEM) -> [0; FREEMEM)
+        ph->p_va &= 0xFFFFFFFFull;
+
+        uint32_t lba = (ph->p_offset / ATA_SECTOR_SIZE) + KERNEL_BASE_DISK_SECTOR;
+        if (disk_io_read_segment(ph->p_va, ph->p_memsz, lba) != 0) {
+            terminal_printf("Can't read segment `%u'", lba);
+            return -1;
+        }
+
+        if (PADDR(free_memory) < PADDR(ph->p_va + ph->p_memsz))
+            // Сдвигаем `free_memory', чтобы `loader_alloc()' мог
+            // возвращать доступную память после завершения этой функции
+            free_memory = (uint8_t *)(uintptr_t)(ph->p_va + ph->p_memsz);
+    }
+    // Не забываем обновить значение kernel_entry_point
+    *kernel_entry_point = elf_header->e_entry;
 
     return 0;
 }
@@ -137,12 +204,28 @@ int loader_read_kernel(uint64_t *kernel_entry_point)
 #define MEMORY_TYPE_FREE 1
 uint64_t loader_detect_memory(struct bios_mmap_entry *memory_map, uint32_t cnt)
 {
-    (void)memory_map;
-    (void)cnt;
+    //-------------------//
+    // Подготовка памяти //
+    // ------------------//
 
     max_physical_address = 0;
     uint64_t pages_cnt = 0;
 
+    // Для каждой области памяти
+    for (uint32_t i = 0; i < cnt; ++i) {
+        // Проверяем тип этой области памяти (должна быть доступной)
+        if (memory_map[i].type != MEMORY_TYPE_FREE)
+            continue;
+        // Проверяем, что сумма базового адреса и длины области не больше max_physical_address
+        if (memory_map[i].base_addr + memory_map[i].addr_len < max_physical_address)
+            continue;
+
+        // В переменной max_physical_address аккумулируется значение по максимально доступной памяти
+        max_physical_address = memory_map[i].base_addr + memory_map[i].addr_len;
+    }
+
+    // Количество страниц можно узнать, поделив max_physical_address на размер одной страницы
+    pages_cnt = ROUND_DOWN(max_physical_address, PAGE_SIZE) / PAGE_SIZE;
     terminal_printf("Available memory: %u Kb (%u pages)\n",
                     (uint32_t)(max_physical_address / 1024), (uint32_t)pages_cnt);
 
@@ -151,10 +234,19 @@ uint64_t loader_detect_memory(struct bios_mmap_entry *memory_map, uint32_t cnt)
 
 int loader_init_memory(struct bios_mmap_entry *mm, uint32_t cnt, uint64_t pages_cnt)
 {
+    // Функция должна подготовить управляющие структуры и подготовить список страниц.
+    // Сначала выделяется память и заполняется значениям управляющие структуры:
+    // - state
+    // - config
+    // - pml4
+
     static struct mmap_state state;
 
     config = loader_alloc(sizeof(*config), PAGE_SIZE);
     memset(config, 0, sizeof(*config));
+
+    // Затем, загружает новую таблицу GDT. Теперь нужно иметь 5 дескрипторов:
+    // нулевой, два дескриптора для ядра и два дескриптора для пользователя.
 
     gdt = loader_init_gdt();
 
@@ -165,6 +257,8 @@ int loader_init_memory(struct bios_mmap_entry *mm, uint32_t cnt, uint64_t pages_
     // Allocate and initialize physical pages array
     pages = loader_alloc(SIZEOF_PAGE64 * pages_cnt, PAGE_SIZE);
     memset(pages, 0, SIZEOF_PAGE64 * pages_cnt);
+
+    // Обновляем поля в структуре config и в структуре state
 
     // Initialize config
     config->pages_cnt = pages_cnt;
