@@ -41,16 +41,8 @@ define debug-loader
 	layout split
 
 	b *0x100000
-	b *0x100017
-	b *0x100157
-	b *0x100222
-	b *0x100290
-	b *0x100414
-	b *0x10046e
-	b *0x100475
-	b *0x1004b6
-	b *0x10050c
-	b *0x10232e
+	b interrupt_init
+	b loader_enter_long_mode
 end
 document debug-loader
 Syntax: debug-loader
