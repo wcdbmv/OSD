@@ -99,9 +99,32 @@ void page_fault_handler(struct task *task)
 	uintptr_t va = rcr2();
 	pte_t *pte = NULL;
 
-	// Your code goes here
-	if (true)
+	page_lookup(task->pml4, va, &pte); // to initialize `pte'
+	if ((task->context.error_code & PAGE_FAULT_ERROR_CODE_R_W) == 0 || pte == NULL)
+		// non write error
 		goto fail;
+
+	if ((*pte & PTE_COW) != 0) {
+		unsigned perm = *pte & PTE_FLAGS_MASK;
+		struct page *new;
+
+		assert((*pte & PTE_P) != 0);
+		if ((new = page_alloc()) == NULL) {
+			terminal_printf("page_fault_handler: can't allocate page\n");
+			goto fail;
+		}
+
+		terminal_printf("page fault: va = %p, new page: %p\n", va, new);
+		if (page_insert(task->pml4, new, KERNEL_TEMP, perm | PTE_W) != 0)
+			goto fail;
+		memcpy((void *)KERNEL_TEMP, (void *)ROUND_DOWN(va, PAGE_SIZE), PAGE_SIZE);
+		if (page_insert(task->pml4, new, ROUND_DOWN(va, PAGE_SIZE), (*pte & PTE_FLAGS_MASK) | PTE_W) != 0)
+			goto fail;
+		page_remove(task->pml4, KERNEL_TEMP);
+
+		task_run(task);
+	}
+
 
 fail:
 	terminal_printf("Page fault at '%lx', operation: %s, accessed by: %s\n", va,
