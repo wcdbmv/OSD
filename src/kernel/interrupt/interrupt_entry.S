@@ -83,7 +83,7 @@ interrupt_handler_common:
 	pushq %rax
 
 	// Обновляем регистры ds, es т.к. мы переключаемся на новый стек.
-	// Перед этим не забудьте сохранить регистр rax.
+	// Перед этим сохраняем регистр rax.
 	pushq %rax
 	movw $GD_KD, %ax
 	movw %ax, %ds

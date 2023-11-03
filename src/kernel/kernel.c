@@ -144,9 +144,7 @@ void kernel_main(void)
 
 #if LAB == 4
     asm volatile("int $0x14\n");
-#elif LAB == 5
-    asm volatile("int $0x22\n");
-#endif
+#endif  // LAB == 4
 #endif  // LAB >= 4
 
 #if LAB >= 6

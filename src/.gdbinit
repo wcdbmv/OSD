@@ -41,7 +41,6 @@ define debug-loader
 	layout split
 
 	b *0x100000
-	b interrupt_init
 	b loader_enter_long_mode
 end
 document debug-loader
@@ -55,6 +54,8 @@ define debug-kernel
 	add-symbol-file kernel/kernel 0xFFFFFFF800200000
 
 	layout split
+
+	b interrupt_handler
 end
 document debug-kernel
 Syntax: debug-kernel
