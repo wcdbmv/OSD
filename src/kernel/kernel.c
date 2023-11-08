@@ -151,7 +151,7 @@ void kernel_main(void)
     // Initialize tasks free list
     task_init();
 
-    //TASK_STATIC_INITIALIZER(hello);
+    TASK_STATIC_INITIALIZER(hello);
 
     //TASK_STATIC_INITIALIZER(read_kernel);
     //TASK_STATIC_INITIALIZER(read_unmap);

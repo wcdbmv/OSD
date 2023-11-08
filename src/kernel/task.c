@@ -27,7 +27,11 @@ void task_init(void)
 {
     struct cpu_context *cpu = cpu_context();
 
-    // loop here
+    // Инициализируем список задач и помечаем состояние задачи как TASK_STATE_FREE.
+    for (int32_t i = TASK_MAX_CNT - 1; i >= 0; --i) {
+        LIST_INSERT_HEAD(&free_tasks, &tasks[i], free_link);
+        tasks[i].state = TASK_STATE_FREE;
+    }
 
     cpu->task = &cpu->self_task;
     memset(cpu->task, 0, sizeof(*cpu->task));
@@ -48,10 +52,30 @@ void task_list(void)
 
 // LAB6 Instruction:
 // - find and destroy task with id == 'task_id' (check 'tasks' list)
-// - don't allow destroy kernel thread (check privilege level)
+// - don't allow to destroy kernel thread (check privilege level)
 void task_kill(task_id_t task_id)
 {
-    // loop here
+    // Пройтись по списку задач, проверить состояние задачи на TASK_STATE_RUN
+    // и на TASK_STATE_READY, что идентификатор id != task_id. Проверить
+    // регистр cs на доступ. Если все проверки прошли успешно, то вызвать
+    // функцию task_destroy.
+    for (uint32_t i = 0; i < TASK_MAX_CNT; i++) {
+        if (tasks[i].state != TASK_STATE_RUN &&
+            tasks[i].state != TASK_STATE_READY) {
+            continue;
+        }
+
+        if (tasks[i].id != task_id) {
+            continue;
+        }
+
+        if ((tasks[i].context.cs & GDT_DPL_U) == 0) {
+            return terminal_printf("error: killing kernel tasks is forbidden\n");
+        }
+
+        return task_destroy(&tasks[i]);
+    }
+
     terminal_printf("Can't kill task '%d': no such task\n", task_id);
 }
 
@@ -86,7 +110,16 @@ struct task* task_new(const char *name)
     }
     page_incref(pml4_page);
 
-    (void)kernel_pml4;
+    // Посчитаем виртуальный адрес для новой pml4_page и обновим поле task->pml4
+    task->pml4 = page2kva(pml4_page);
+
+    // Очистим таблицу pml4, на случай если там будут битые данные
+    memset(task->pml4, 0, PAGE_SIZE);
+
+    // Дальше копируем общую для всех программ область ядра (kernel space) в память программы.
+    // Эта область пространства ядра будет одинаковой для всех создаваемых задач.
+    memcpy(&task->pml4[PML4_IDX(USER_TOP)], &kernel_pml4[PML4_IDX(USER_TOP)],
+           PAGE_SIZE - PML4_IDX(USER_TOP)*sizeof(pml4e_t));
 
     return task;
 }
@@ -182,11 +215,27 @@ static int task_load_segment(struct task *task, const char *name,
     uint64_t va = ROUND_DOWN(ph->p_va, PAGE_SIZE);
     uint64_t size = ROUND_UP(ph->p_memsz, PAGE_SIZE);
 
-    (void)va;
-    (void)size;
-    (void)name;
-    (void)task;
-    (void)binary;
+    // Выделим память под размер сегмента (уже посчитан — size)
+    for (uint64_t i = 0; i < size; i += PAGE_SIZE) {
+        // В цикле надо выделить память под страницу,
+        struct page *page = page_alloc();
+
+        // проверить, что страница была выделена
+        if (page == NULL) {
+            terminal_printf("Can't load `%s': no more free pages\n", name);
+            return -1;
+        }
+
+        // и добавить эту страницу в иерархию таблиц страниц.
+        if (page_insert(task->pml4, page, va + i, PTE_U | PTE_W) != 0) {
+            terminal_printf("Can't load `%s': page_insert failed\n", name);
+            return -1;
+        }
+    }
+
+    // После того как память выделена, загружаем данные с начала адреса программы в память.
+    memcpy((void *)ph->p_va, binary + ph->p_offset, ph->p_filesz);
+    memset((void *)(ph->p_va + ph->p_filesz), 0, ph->p_memsz - ph->p_filesz);
 
     return 0;
 }
@@ -204,12 +253,33 @@ static int task_load(struct task *task, const char *name, uint8_t *binary, size_
         return -1;
     }
 
-    (void)config;
-    (void)task;
-    (void)name;
-    (void)size;
+    // Прежде всего надо загрузить новое значение pml4 в регистр cr3 из task_context
+    lcr3(PADDR(task->pml4));
+
+    // Загрузим заголовки программы, по аналогии с первым и вторым загрузчиком
+    for (struct elf64_program_header *ph = ELF64_PHEADER_FIRST(elf_header);
+         ph < ELF64_PHEADER_LAST(elf_header); ++ph) {
+
+        // Перед загрузкой проверим тип заголовка — надо ли его грузить
+        if (ph->p_type != ELF_PHEADER_TYPE_LOAD) {
+            continue;
+        }
+        if (ph->p_offset > size) {
+            terminal_printf("Can't load task `%s': truncated binary\n", name);
+            goto cleanup;
+        }
+        if (task_load_segment(task, name, binary, ph) != 0)
+            goto cleanup;
+        }
+
+    // После того как elf-файл загружен в память, в регистр rip надо передать точку входа e_entry
+    task->context.rip = elf_header->e_entry;
 
     return 0;
+
+cleanup:
+    lcr3(PADDR(config->pml4.ptr));
+    return -1;
 }
 
 // LAB6 Instruction:
@@ -226,7 +296,25 @@ int task_create(const char *name, uint8_t *binary, size_t size)
     if (task_load(task, name, binary, size) != 0)
         goto cleanup;
 
-    (void)stack;
+    // Выделим память для стека (хватит одной страницы)
+    if ((stack = page_alloc()) == NULL) {
+        terminal_printf("Can't create `%s': no memory for user stack\n", name);
+        goto cleanup;
+    }
+    // Вставим выделенную страницу с правильными битами разрешения в pml4
+    if (page_insert(task->pml4, stack, USER_STACK_TOP-PAGE_SIZE, PTE_U | PTE_W) != 0) {
+        terminal_printf("Can't create `%s': page_insert failed\n", name);
+        goto cleanup;
+    }
+
+    // Обновим регистры в структуре контекста
+    task->context.cs = GD_UT | GDT_DPL_U;
+    task->context.ds = GD_UD | GDT_DPL_U;
+    task->context.es = GD_UD | GDT_DPL_U;
+    task->context.ss = GD_UD | GDT_DPL_U;
+    task->context.rsp = USER_STACK_TOP;
+
+    task->state = TASK_STATE_READY;
 
     return 0;
 
@@ -289,10 +377,28 @@ void schedule(void)
     struct cpu_context *cpu = cpu_context();
     static int next_task_idx = 0;
 
-    (void)cpu;
-    (void)next_task_idx;
+    for (uint32_t i = next_task_idx, j = 0; j < TASK_MAX_CNT; j++) {
+        // Индекс процесса будет вычисляться, как остаток от деления от суммы next_task_idx и индекса массива tasks и TASK_MAX_CNT
+        uint32_t idx = (i + j) % TASK_MAX_CNT;
 
-    // loop here
+        // Проверим состояние работы программы
+        if (tasks[idx].state != TASK_STATE_READY) {
+            // Проверим, что запускается только одна новая программа, так как у нас только один рабочий "процессор"
+            assert(tasks[idx].state != TASK_STATE_RUN);
+            continue;
+        }
+
+        // По необходимости перезагрузить адрес начала таблицы pml4
+        if (rcr3() != PADDR(tasks[idx].pml4))
+            lcr3(PADDR(tasks[idx].pml4));
+
+        // Обновим контекст процесса новыми значения:
+        cpu->task = &tasks[idx];  // сама программа, которая будет выполняться
+        cpu->pml4 = cpu->task->pml4;  // адрес на таблицу pml4 этой программы.
+
+        next_task_idx = idx + 1;
+        task_run(&tasks[idx]);
+    }
 
     panic("no more tasks");
 }
