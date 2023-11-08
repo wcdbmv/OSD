@@ -68,12 +68,14 @@ static int sys_fork(struct task *task)
 	// task_share_page. Чтобы получить 12 нижних битов, которые определяют разрешения
 	// на чтение/запись и т. д., можно использовать значение PTE_FLAGS_MASK
 
+	// PML4 — таблица страниц верхнего уровня в длинном режиме
 	for (uint16_t i = 0; i <= PML4_IDX(USER_TOP); i++) {
 		uintptr_t pdpe_pa = PML4E_ADDR(task->pml4[i]);
 
 		if ((task->pml4[i] & PML4E_P) == 0)
 			continue;
 
+		// PDP — таблица указателей на директории страниц
 		pdpe_t *pdpe = VADDR(pdpe_pa);
 		for (uint16_t j = 0; j < NPDP_ENTRIES; j++) {
 			uintptr_t pde_pa = PDPE_ADDR(pdpe[j]);
@@ -81,6 +83,7 @@ static int sys_fork(struct task *task)
 			if ((pdpe[j] & PDPE_P) == 0)
 				continue;
 
+			// PDE (Page Directory Entry) — элемент директории страниц
 			pde_t *pde = VADDR(pde_pa);
 			for (uint16_t k = 0; k < NPD_ENTRIES; k++) {
 				uintptr_t pte_pa = PTE_ADDR(pde[k]);
@@ -88,6 +91,7 @@ static int sys_fork(struct task *task)
 				if ((pde[k] & PDE_P) == 0)
 					continue;
 
+				// PTE — элемент таблицы страниц
 				pte_t *pte = VADDR(pte_pa);
 				for (uint16_t l = 0; l < NPT_ENTRIES; l++) {
 					if ((pte[l] & PTE_P) == 0)
