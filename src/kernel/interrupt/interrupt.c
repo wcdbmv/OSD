@@ -147,6 +147,11 @@ void interrupt_handler(struct task_context ctx)
 {
 	struct cpu_context *cpu = cpu_context();
 
+	// XXX: Interrupts are disabled here, think twice before enable it,
+	// because they can modify 'cpu' value (it may cause a lot of problems)
+	cpu->task->context = ctx;
+	cpu->task->state = TASK_STATE_READY;
+
 	// LAB4 Instruction:
 	// - process known interrupt, and use default handler for all others.
 	// - take into account, that kernel uses 'int 3' to call 'schedule()'
